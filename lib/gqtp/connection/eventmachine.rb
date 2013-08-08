@@ -29,7 +29,17 @@ module GQTP
       end
 
       class Socket < EM::Connection
-        def self.open(host, port) EM.connect host, port, Socket end
+        def self.open(host, port) EM.connect host, port, Socket, host, port end
+        def initialize(host, port) @host, @port = host, port end
+
+        def reopen
+          raise IOError if @closed
+          if @remote_closed
+            wait_next_tick
+            reconnect @host, @port
+            post_init
+          end
+        end
 
         def post_init
           @in = ''.force_encoding('ASCII-8BIT')
@@ -59,13 +69,13 @@ module GQTP
 
         def recv(len)
           raise IOError, "closed stream" if @closed
-          em_sleep(0) until @in.bytesize >= len
+          wait_next_tick until @in.bytesize >= len
           @in.slice! 0, len if @in.bytesize >= len
         end
 
-        def em_sleep(secs)
+        def wait_next_tick
           fiber = Fiber.current
-          EM::Timer.new(secs){fiber.resume}
+          EM.next_tick{fiber.resume}
           Fiber.yield
         end
 
@@ -97,12 +107,18 @@ module GQTP
           end
           block.call if block
           Request.new nil
+        rescue Errno::EPIPE
+          @socket.reopen
+          retry
         end
 
         def read(size, &block)
           result = @socket.recv(size)
           block.call result if block
           Request.new result
+        rescue Errno::EPIPE
+          @socket.reopen
+          retry
         end
 
         def close
