@@ -99,6 +99,7 @@ module GQTP
           @address = options[:address] || "127.0.0.1"
           @port = options[:port] || 10041
           @socket = Socket.open(@address, @port)
+          e = @socket.error? and raise e
         end
 
         def write(*chunks, &block)
